@@ -102,6 +102,11 @@ func serviceCommonSchema() map[string]*schema.Schema {
 			Optional:    true,
 			Description: "Prevents the service from being deleted. It is recommended to set this to `true` for all production services to prevent unintentional service deletion. This does not shield against deleting databases or topics but for services with backups much of the content can at least be restored from backup in case accidental deletion is done.",
 		},
+		"disk_space_mb": {
+			Type:        schema.TypeInt,
+			Optional:    true,
+			Description: "The dynamic disk space of the service",
+		},
 		"service_uri": {
 			Type:        schema.TypeString,
 			Computed:    true,
@@ -258,6 +263,11 @@ var aivenServiceSchema = map[string]*schema.Schema{
 		Type:        schema.TypeBool,
 		Optional:    true,
 		Description: "Prevent service from being deleted. It is recommended to have this enabled for all services.",
+	},
+	"disk_space_mb": {
+		Type:        schema.TypeInt,
+		Optional:    true,
+		Description: "The dynamic disk space of the service",
 	},
 	"service_uri": {
 		Type:        schema.TypeString,
@@ -697,6 +707,7 @@ func resourceServiceCreate(ctx context.Context, d *schema.ResourceData, m interf
 			ServiceName:           d.Get("service_name").(string),
 			ServiceType:           serviceType,
 			TerminationProtection: d.Get("termination_protection").(bool),
+			DiskSpaceMB:           d.Get("disk_space_mb").(int),
 			UserConfig:            userConfig,
 		},
 	)
@@ -762,6 +773,7 @@ func resourceServiceUpdate(ctx context.Context, d *schema.ResourceData, m interf
 			ProjectVPCID:          vpcIDPointer,
 			Powered:               true,
 			TerminationProtection: d.Get("termination_protection").(bool),
+			DiskSpaceMB:           d.Get("disk_space_mb").(int),
 			UserConfig:            userConfig,
 		},
 	)
@@ -880,6 +892,9 @@ func copyServicePropertiesFromAPIResponseToTerraform(
 		return err
 	}
 	if err := d.Set("maintenance_window_time", service.MaintenanceWindow.TimeOfDay); err != nil {
+		return err
+	}
+	if err := d.Set("disk_space_mb", service.DiskSpaceMB); err != nil {
 		return err
 	}
 	if err := d.Set("service_uri", service.URI); err != nil {
