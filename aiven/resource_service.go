@@ -1057,14 +1057,15 @@ func servicePlanParamsCheckDiskSize(params servicePlanParameters, requestedDiskS
 }
 
 func resourceServiceGetServicePlanParameters(ctx context.Context, client *aiven.Client, d resourceStateOrResourceDiff) (servicePlanParameters, error) {
-	serviceTypesResponse, err := client.ServiceTypes.Get(d.Get("project").(string))
-	if err != nil {
-		return servicePlanParameters{}, fmt.Errorf("unable to get service types from api: %w", err)
-	}
+	project := d.Get("project").(string)
 	serviceType := d.Get("service_type").(string)
 	servicePlan := d.Get("plan").(string)
 	serviceRegion := d.Get("cloud_name").(string)
 
+	serviceTypesResponse, err := client.ServiceTypes.Get(project)
+	if err != nil {
+		return servicePlanParameters{}, fmt.Errorf("unable to get service types from api: %w", err)
+	}
 	serviceTypeDescription, ok := serviceTypesResponse.ServiceTypes[serviceType]
 	if !ok {
 		return servicePlanParameters{}, fmt.Errorf("service type '%s' unknown to service types api", serviceType)
@@ -1093,6 +1094,8 @@ func resourceServiceGetServicePlanParameters(ctx context.Context, client *aiven.
 func resourceServiceCustomizeDiff(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
 	client := m.(*aiven.Client)
 
+	// Some service integrations can be created when creating a service, think 'read_replica' for example.
+	// Those are only applicable for the initial request and should not
 	if len(d.Id()) > 0 && d.HasChange("service_integrations") && len(d.Get("service_integrations").([]interface{})) != 0 {
 		return fmt.Errorf("service_integrations field can only be set during creation of a service")
 	}
@@ -1102,7 +1105,6 @@ func resourceServiceCustomizeDiff(ctx context.Context, d *schema.ResourceDiff, m
 		return fmt.Errorf("unable to get service type parameters: %w", err)
 	}
 
-	// validate disk_space_mb
 	if diskSizeInterface, ok := d.GetOk("disk_space_mb"); ok {
 		if err = servicePlanParamsCheckDiskSize(serviceTypeParams, diskSizeInterface.(int)); err != nil {
 			return fmt.Errorf("disk size check failed: %w", err)
