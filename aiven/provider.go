@@ -156,6 +156,22 @@ func Provider() *schema.Provider {
 	return p
 }
 
+// either *schema.ResourceState or *schema.ResourceDiff
+type resourceStateOrResourceDiff interface {
+	GetOk(key string) (interface{}, bool)
+	Get(key string) interface{}
+}
+
+// gets the key or returns the default value
+// the default value and schema for key must have the same type
+func getOrDefault(d resourceStateOrResourceDiff, key string, dval interface{}) interface{} {
+	if val, ok := d.GetOk(key); !ok {
+		return dval
+	} else {
+		return val
+	}
+}
+
 func optionalString(d *schema.ResourceData, key string) string {
 	str, ok := d.Get(key).(string)
 	if !ok {
@@ -384,6 +400,13 @@ func ipFilterArrayDiffSuppressFunc(k, old, new string, d *schema.ResourceData) b
 
 func ipFilterValueDiffSuppressFunc(k, old, new string, _ *schema.ResourceData) bool {
 	return old == "0.0.0.0/0" && new == "" && strings.HasSuffix(k, ".ip_filter.0")
+}
+
+func keyIsNotSetDiffSuppressFunc(key string) schema.SchemaDiffSuppressFunc {
+	return func(_, _, _ string, d *schema.ResourceData) bool {
+		_, ok := d.GetOk(key)
+		return ok
+	}
 }
 
 // validateDurationString is a ValidateFunc that ensures a string parses
