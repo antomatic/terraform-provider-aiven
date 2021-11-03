@@ -8,6 +8,7 @@ require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/aiven/aiven-go-client v1.6.3-0.20211103094632-c4f0d4875f29
 	github.com/aws/aws-sdk-go v1.40.55 // indirect
+	github.com/docker/go-units v0.4.0 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect

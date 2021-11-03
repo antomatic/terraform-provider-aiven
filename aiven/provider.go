@@ -5,11 +5,12 @@ package aiven
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/docker/go-units"
 
 	"github.com/aiven/aiven-go-client"
 	"github.com/aiven/terraform-provider-aiven/aiven/templates"
@@ -160,16 +161,6 @@ func Provider() *schema.Provider {
 type resourceStateOrResourceDiff interface {
 	GetOk(key string) (interface{}, bool)
 	Get(key string) interface{}
-}
-
-// gets the key or returns the default value
-// the default value and schema for key must have the same type
-func getOrDefault(d resourceStateOrResourceDiff, key string, dval interface{}) interface{} {
-	if val, ok := d.GetOk(key); !ok {
-		return dval
-	} else {
-		return val
-	}
 }
 
 func optionalString(d *schema.ResourceData, key string) string {
@@ -323,6 +314,12 @@ func createOnlyDiffSuppressFunc(_, _, _ string, d *schema.ResourceData) bool {
 	return len(d.Id()) > 0
 }
 
+func humanByteSizeDiffSuppressFunc(_, n, o string, _ *schema.ResourceData) bool {
+	nb, _ := units.RAMInBytes(n)
+	ob, _ := units.RAMInBytes(o)
+	return nb == ob
+}
+
 // emptyObjectDiffSuppressFunc suppresses a diff for service user configuration options when
 // fields are not set by the user but have default or previously defined values.
 func emptyObjectDiffSuppressFunc(k, old, new string, _ *schema.ResourceData) bool {
@@ -406,10 +403,17 @@ func ipFilterValueDiffSuppressFunc(k, old, new string, _ *schema.ResourceData) b
 // as time.Duration format
 func validateDurationString(v interface{}, k string) (ws []string, errors []error) {
 	if _, err := time.ParseDuration(v.(string)); err != nil {
-		log.Printf("[DEBUG] invalid duration: %s", err)
 		errors = append(errors, fmt.Errorf("%q: invalid duration", k))
 	}
+	return
+}
 
+// validateHumanByteSizeString is a ValidateFunc that ensures a string parses
+// as units.Bytes format
+func validateHumanByteSizeString(v interface{}, k string) (ws []string, errors []error) {
+	if _, err := units.RAMInBytes(v.(string)); err != nil {
+		errors = append(errors, fmt.Errorf("%q: invalid human readable byte size", k))
+	}
 	return
 }
 

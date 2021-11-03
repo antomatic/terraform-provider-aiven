@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
+
 	"github.com/aiven/aiven-go-client"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -102,10 +104,12 @@ func serviceCommonSchema() map[string]*schema.Schema {
 			Optional:    true,
 			Description: "Prevents the service from being deleted. It is recommended to set this to `true` for all production services to prevent unintentional service deletion. This does not shield against deleting databases or topics but for services with backups much of the content can at least be restored from backup in case accidental deletion is done.",
 		},
-		"disk_space_mb": {
-			Type:        schema.TypeInt,
-			Optional:    true,
-			Description: "The dynamic disk space of the service",
+		"disk_space": {
+			Type:             schema.TypeString,
+			Optional:         true,
+			Description:      "The disk space of the service, possible values depend on the service type, the cloud provider and the project. Reducing will result in the service rebalancing.",
+			DiffSuppressFunc: humanByteSizeDiffSuppressFunc,
+			ValidateFunc:     validateHumanByteSizeString,
 		},
 		"service_uri": {
 			Type:        schema.TypeString,
@@ -264,10 +268,12 @@ var aivenServiceSchema = map[string]*schema.Schema{
 		Optional:    true,
 		Description: "Prevent service from being deleted. It is recommended to have this enabled for all services.",
 	},
-	"disk_space_mb": {
-		Type:        schema.TypeInt,
-		Optional:    true,
-		Description: "The dynamic disk space of the service",
+	"disk_space": {
+		Type:             schema.TypeString,
+		Optional:         true,
+		Description:      "The disk space of the service, possible values depend on the service type, the cloud provider and the project. Reducing will result in the service rebalancing.",
+		DiffSuppressFunc: humanByteSizeDiffSuppressFunc,
+		ValidateFunc:     validateHumanByteSizeString,
 	},
 	"service_uri": {
 		Type:        schema.TypeString,
@@ -697,10 +703,10 @@ func resourceServiceRead(_ context.Context, d *schema.ResourceData, m interface{
 func resourceServiceCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*aiven.Client)
 
-	// get service type specific defaults
-	serviceTypeParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
+	// get service plan specific defaults
+	servicePlanParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("unable to get service type parameters: %w", err))
+		return diag.FromErr(fmt.Errorf("unable to get service plan parameters: %w", err))
 	}
 
 	serviceType := d.Get("service_type").(string)
@@ -717,7 +723,7 @@ func resourceServiceCreate(ctx context.Context, d *schema.ResourceData, m interf
 			ServiceName:           d.Get("service_name").(string),
 			ServiceType:           serviceType,
 			TerminationProtection: d.Get("termination_protection").(bool),
-			DiskSpaceMB:           getOrDefault(d, "disk_space_mb", serviceTypeParams.diskSizeDefault).(int),
+			DiskSpaceMB:           resourceServiceGetDiskSpaceMBOrServicePlanDefault(d, servicePlanParams),
 			UserConfig:            ConvertTerraformUserConfigToAPICompatibleFormat("service", serviceType, true, d),
 		},
 	); err != nil {
@@ -737,10 +743,10 @@ func resourceServiceCreate(ctx context.Context, d *schema.ResourceData, m interf
 func resourceServiceUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*aiven.Client)
 
-	// get service type specific defaults
-	serviceTypeParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
+	// get service plan specific defaults
+	servicePlanParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("unable to get service type parameters: %w", err))
+		return diag.FromErr(fmt.Errorf("unable to get service plan parameters: %w", err))
 	}
 
 	projectName, serviceName := splitResourceID2(d.Id())
@@ -755,7 +761,7 @@ func resourceServiceUpdate(ctx context.Context, d *schema.ResourceData, m interf
 			ProjectVPCID:          resourceServiceGetProjectVPCIdPointer(d),
 			Powered:               true,
 			TerminationProtection: d.Get("termination_protection").(bool),
-			DiskSpaceMB:           getOrDefault(d, "disk_space_mb", serviceTypeParams.diskSizeDefault).(int),
+			DiskSpaceMB:           resourceServiceGetDiskSpaceMBOrServicePlanDefault(d, servicePlanParams),
 			UserConfig:            ConvertTerraformUserConfigToAPICompatibleFormat("service", d.Get("service_type").(string), false, d),
 		},
 	); err != nil {
@@ -860,7 +866,7 @@ func copyServicePropertiesFromAPIResponseToTerraform(
 	if err := d.Set("maintenance_window_time", service.MaintenanceWindow.TimeOfDay); err != nil {
 		return err
 	}
-	if err := d.Set("disk_space_mb", service.DiskSpaceMB); err != nil {
+	if err := d.Set("disk_space", units.BytesSize(float64(service.DiskSpaceMB*units.MiB))); err != nil {
 		return err
 	}
 	if err := d.Set("service_uri", service.URI); err != nil {
@@ -1025,32 +1031,46 @@ func resourceServiceGetMaintenanceWindow(d resourceStateOrResourceDiff) *aiven.M
 	return nil
 }
 
+func resourceServiceGetDiskSpaceMBOrServicePlanDefault(d resourceStateOrResourceDiff, params servicePlanParameters) int {
+	diskSpaceSchema, ok := d.GetOk("disk_space")
+	if !ok {
+		return params.diskSizeMBDefault
+	}
+	diskSizeMB, _ := units.RAMInBytes(diskSpaceSchema.(string))
+	return int(diskSizeMB / units.MiB)
+}
+
 type servicePlanParameters struct {
-	diskSizeDefault int
-	diskSizeStep    int
-	diskSizeMax     int
+	diskSizeMBDefault int
+	diskSizeMBStep    int
+	diskSizeMBMax     int
 }
 
 func servicePlanParamsDiskSizeIsConfigurable(params servicePlanParameters) bool {
-	return params.diskSizeMax != 0 && params.diskSizeStep != 0
+	return params.diskSizeMBMax != 0 && params.diskSizeMBStep != 0
 }
 
-func servicePlanParamsCheckDiskSize(params servicePlanParameters, requestedDiskSize int) error {
-	if requestedDiskSize != params.diskSizeDefault && !servicePlanParamsDiskSizeIsConfigurable(params) {
+func servicePlanParamsCheckDiskSize(params servicePlanParameters, requestedDiskSizeMB int) error {
+	if requestedDiskSizeMB != params.diskSizeMBDefault && !servicePlanParamsDiskSizeIsConfigurable(params) {
 		return fmt.Errorf("disk size is not configurable for this service plan")
 	}
 
-	if requestedDiskSize < params.diskSizeDefault {
-		return fmt.Errorf("requested disk size is too small: '%d' < '%d'", requestedDiskSize, params.diskSizeDefault)
+	humanReadableDiskSpaceDefault := units.BytesSize(float64(params.diskSizeMBDefault * units.MiB))
+	humanReadableDiskSpaceMax := units.BytesSize(float64(params.diskSizeMBMax * units.MiB))
+	humanReadableDiskSpaceStep := units.BytesSize(float64(params.diskSizeMBStep * units.MiB))
+	humanReadableRequestedDiskSpace := units.BytesSize(float64(requestedDiskSizeMB * units.MiB))
+
+	if requestedDiskSizeMB < params.diskSizeMBDefault {
+		return fmt.Errorf("requested disk size is too small: '%s' < '%s'", humanReadableRequestedDiskSpace, humanReadableDiskSpaceDefault)
 	}
-	if params.diskSizeMax != 0 {
-		if requestedDiskSize > params.diskSizeMax {
-			return fmt.Errorf("requested disk size is too large: '%d' > '%d'", requestedDiskSize, params.diskSizeMax)
+	if params.diskSizeMBMax != 0 {
+		if requestedDiskSizeMB > params.diskSizeMBMax {
+			return fmt.Errorf("requested disk size is too large: '%s' > '%s'", humanReadableRequestedDiskSpace, humanReadableDiskSpaceMax)
 		}
 	}
-	if params.diskSizeStep != 0 {
-		if (requestedDiskSize-params.diskSizeDefault)%params.diskSizeStep != 0 {
-			return fmt.Errorf("requested disk size has to increase from: '%d' in increments of '%d'", params.diskSizeDefault, params.diskSizeStep)
+	if params.diskSizeMBStep != 0 {
+		if (requestedDiskSizeMB-params.diskSizeMBDefault)%params.diskSizeMBStep != 0 {
+			return fmt.Errorf("requested disk size has to increase from: '%s' in increments of '%s'", humanReadableDiskSpaceDefault, humanReadableDiskSpaceStep)
 		}
 	}
 	return nil
@@ -1082,9 +1102,9 @@ func resourceServiceGetServicePlanParameters(ctx context.Context, client *aiven.
 			continue
 		}
 		return servicePlanParameters{
-			diskSizeDefault: serviceRegionDescription.DiskSpaceMB,
-			diskSizeMax:     serviceRegionDescription.DiskSpaceCapMB,
-			diskSizeStep:    serviceRegionDescription.DiskSpaceStepMB,
+			diskSizeMBDefault: serviceRegionDescription.DiskSpaceMB,
+			diskSizeMBMax:     serviceRegionDescription.DiskSpaceCapMB,
+			diskSizeMBStep:    serviceRegionDescription.DiskSpaceStepMB,
 		}, nil
 	}
 	return servicePlanParameters{}, fmt.Errorf("unable to find service plan parameters for '%s', '%s', '%s'", serviceType, servicePlan, serviceRegion)
@@ -1100,15 +1120,13 @@ func resourceServiceCustomizeDiff(ctx context.Context, d *schema.ResourceDiff, m
 		return fmt.Errorf("service_integrations field can only be set during creation of a service")
 	}
 
-	serviceTypeParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
+	servicePlanParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
 	if err != nil {
 		return fmt.Errorf("unable to get service type parameters: %w", err)
 	}
 
-	if diskSizeInterface, ok := d.GetOk("disk_space_mb"); ok {
-		if err = servicePlanParamsCheckDiskSize(serviceTypeParams, diskSizeInterface.(int)); err != nil {
-			return fmt.Errorf("disk size check failed: %w", err)
-		}
+	if err = servicePlanParamsCheckDiskSize(servicePlanParams, resourceServiceGetDiskSpaceMBOrServicePlanDefault(d, servicePlanParams)); err != nil {
+		return fmt.Errorf("disk size check failed: %w", err)
 	}
 
 	return nil
