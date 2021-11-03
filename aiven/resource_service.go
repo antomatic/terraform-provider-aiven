@@ -108,8 +108,23 @@ func serviceCommonSchema() map[string]*schema.Schema {
 			Type:             schema.TypeString,
 			Optional:         true,
 			Description:      "The disk space of the service, possible values depend on the service type, the cloud provider and the project. Reducing will result in the service rebalancing.",
-			DiffSuppressFunc: humanByteSizeDiffSuppressFunc,
+			DiffSuppressFunc: diskSpaceDiffSuppressFunc,
 			ValidateFunc:     validateHumanByteSizeString,
+		},
+		"disk_space_default": {
+			Type:        schema.TypeString,
+			Computed:    true,
+			Description: "The default disk space of the service, possible values depend on the service type, the cloud provider and the project. Its also the minimum value for `disk_space`",
+		},
+		"disk_space_step": {
+			Type:        schema.TypeString,
+			Computed:    true,
+			Description: "The default disk space step of the service, possible values depend on the service type, the cloud provider and the project. `disk_space` needs to increment from `disk_space_default` by increments of this size.",
+		},
+		"disk_space_cap": {
+			Type:        schema.TypeString,
+			Computed:    true,
+			Description: "The maximum disk space of the service, possible values depend on the service type, the cloud provider and the project.",
 		},
 		"service_uri": {
 			Type:        schema.TypeString,
@@ -272,8 +287,23 @@ var aivenServiceSchema = map[string]*schema.Schema{
 		Type:             schema.TypeString,
 		Optional:         true,
 		Description:      "The disk space of the service, possible values depend on the service type, the cloud provider and the project. Reducing will result in the service rebalancing.",
-		DiffSuppressFunc: humanByteSizeDiffSuppressFunc,
+		DiffSuppressFunc: diskSpaceDiffSuppressFunc,
 		ValidateFunc:     validateHumanByteSizeString,
+	},
+	"disk_space_default": {
+		Type:        schema.TypeString,
+		Computed:    true,
+		Description: "The default disk space of the service, possible values depend on the service type, the cloud provider and the project. Its also the minimum value for `disk_space`",
+	},
+	"disk_space_step": {
+		Type:        schema.TypeString,
+		Computed:    true,
+		Description: "The default disk space step of the service, possible values depend on the service type, the cloud provider and the project. `disk_space` needs to increment from `disk_space_default` by increments of this size.",
+	},
+	"disk_space_cap": {
+		Type:        schema.TypeString,
+		Computed:    true,
+		Description: "The maximum disk space of the service, possible values depend on the service type, the cloud provider and the project.",
 	},
 	"service_uri": {
 		Type:        schema.TypeString,
@@ -683,7 +713,7 @@ func resourceServiceCustomizeDiffWrapper(serviceType string) schema.CustomizeDif
 	}
 }
 
-func resourceServiceRead(_ context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+func resourceServiceRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*aiven.Client)
 
 	projectName, serviceName := splitResourceID2(d.Id())
@@ -691,8 +721,12 @@ func resourceServiceRead(_ context.Context, d *schema.ResourceData, m interface{
 	if err != nil {
 		return diag.FromErr(resourceReadHandleNotFound(err, d))
 	}
+	servicePlanParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
+	if err != nil {
+		return diag.FromErr(fmt.Errorf("unable to get service plan parameters: %w", err))
+	}
 
-	err = copyServicePropertiesFromAPIResponseToTerraform(d, service, projectName)
+	err = copyServicePropertiesFromAPIResponseToTerraform(d, service, servicePlanParams, projectName)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -788,7 +822,7 @@ func resourceServiceDelete(_ context.Context, d *schema.ResourceData, m interfac
 	return nil
 }
 
-func resourceServiceState(_ context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
+func resourceServiceState(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
 	client := m.(*aiven.Client)
 
 	if len(strings.Split(d.Id(), "/")) != 2 {
@@ -800,8 +834,12 @@ func resourceServiceState(_ context.Context, d *schema.ResourceData, m interface
 	if err != nil {
 		return nil, err
 	}
+	servicePlanParams, err := resourceServiceGetServicePlanParameters(ctx, client, d)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get service plan parameters: %w", err)
+	}
 
-	err = copyServicePropertiesFromAPIResponseToTerraform(d, service, projectName)
+	err = copyServicePropertiesFromAPIResponseToTerraform(d, service, servicePlanParams, projectName)
 	if err != nil {
 		return nil, err
 	}
@@ -835,6 +873,7 @@ func resourceServiceWait(ctx context.Context, d *schema.ResourceData, m interfac
 func copyServicePropertiesFromAPIResponseToTerraform(
 	d *schema.ResourceData,
 	service *aiven.Service,
+	servicePlanParams servicePlanParameters,
 	project string,
 ) error {
 	serviceType := d.Get("service_type").(string)
@@ -867,6 +906,15 @@ func copyServicePropertiesFromAPIResponseToTerraform(
 		return err
 	}
 	if err := d.Set("disk_space", units.BytesSize(float64(service.DiskSpaceMB*units.MiB))); err != nil {
+		return err
+	}
+	if err := d.Set("disk_space_default", units.BytesSize(float64(servicePlanParams.diskSizeMBDefault*units.MiB))); err != nil {
+		return err
+	}
+	if err := d.Set("disk_space_step", units.BytesSize(float64(servicePlanParams.diskSizeMBStep*units.MiB))); err != nil {
+		return err
+	}
+	if err := d.Set("disk_space_cap", units.BytesSize(float64(servicePlanParams.diskSizeMBMax*units.MiB))); err != nil {
 		return err
 	}
 	if err := d.Set("service_uri", service.URI); err != nil {

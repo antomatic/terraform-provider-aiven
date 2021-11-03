@@ -314,7 +314,14 @@ func createOnlyDiffSuppressFunc(_, _, _ string, d *schema.ResourceData) bool {
 	return len(d.Id()) > 0
 }
 
-func humanByteSizeDiffSuppressFunc(_, n, o string, _ *schema.ResourceData) bool {
+func diskSpaceDiffSuppressFunc(_, o, n string, d *schema.ResourceData) bool {
+	// check if new is empty; if so get default from schema ( `disk_space_default` )
+	if n == "" {
+		// default is required field in the api and should be there once we can diff the resource
+		// and it was created
+		n = d.Get("disk_space_default").(string)
+	}
+
 	nb, _ := units.RAMInBytes(n)
 	ob, _ := units.RAMInBytes(o)
 	return nb == ob
