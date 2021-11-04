@@ -132,6 +132,10 @@ func resourceTransitGatewayVPCAttachmentUpdate(ctx context.Context, d *schema.Re
 		}
 	}
 
+	if len(add) == 0 && len(deleteCIDRs) == 0 {
+		return resourceVPCPeeringConnectionRead(ctx, d, m)
+	}
+
 	_, err = client.TransitGatewayVPCAttachment.Update(projectName, vpcID, aiven.TransitGatewayVPCAttachmentRequest{
 		Add:    add,
 		Delete: deleteCIDRs,
