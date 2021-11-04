@@ -41,3 +41,5 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )
+
+replace github.com/aiven/aiven-go-client => github.com/antomatic/aiven-go-client v1.6.3-0.20211104081958-eacfdccb472e
