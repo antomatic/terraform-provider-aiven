@@ -69,6 +69,8 @@ github.com/aiven/aiven-go-client v1.6.3-0.20211021073338-26eab2e79cb4/go.mod h1:
 github.com/andybalholm/crlf v0.0.0-20171020200849-670099aa064f/go.mod h1:k8feO4+kXDxro6ErPXBRTJ/ro2mf0SsFG8s7doP9kJE=
 github.com/anmitsu/go-shlex v0.0.0-20161002113705-648efa622239/go.mod h1:2FmKhYUyUczH0OGQWaF5ceTx0UBShxjsH6f8oGKYe2c=
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
+github.com/antomatic/aiven-go-client v1.6.3-0.20211104081958-eacfdccb472e h1:acP9Gk3n5WQ1YkFqXCXy3luKY3Ua2JW8FBe0ipT2DgI=
+github.com/antomatic/aiven-go-client v1.6.3-0.20211104081958-eacfdccb472e/go.mod h1:3+OtpccynSr5xvSGfn96jVM9dBUAr52HXlaZJi/Mz5o=
 github.com/apparentlymart/go-cidr v1.0.1 h1:NmIwLZ/KdsjIUlhf+/Np40atNXm/+lZ5txfTJ/SpF+U=
 github.com/apparentlymart/go-cidr v1.0.1/go.mod h1:EBcsNrHc3zQeuaeCeCtQruQm+n9/YjEn/vI25Lg7Gwc=
 github.com/apparentlymart/go-dump v0.0.0-20180507223929-23540a00eaa3/go.mod h1:oL81AME2rN47vu18xqj1S1jPIPuN7afo62yKTNn3XMM=
